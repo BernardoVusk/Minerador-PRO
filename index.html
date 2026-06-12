@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vusk Operation — Scanner de Funis Ativos</title>
+    <!-- Polyfill to make window.fetch configurable/writable and prevent sandboxed iframe fetch setter errors -->
+    <script>
+      (function() {
+        var originalFetch = window.fetch;
+        var fetchValue = originalFetch;
+        try {
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return fetchValue;
+            },
+            set: function(val) {
+              fetchValue = val;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          console.warn("Unable to define configurable window.fetch polyfill:", e);
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
