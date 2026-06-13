@@ -79,6 +79,9 @@ export function useFacebookAuth() {
 
     // Listener para receber o token via postMessage
     const handleMessage = (event: MessageEvent) => {
+      // Aceitar apenas mensagens da própria origem
+      if (event.origin !== window.location.origin) return;
+
       if (event.data?.type === "FACEBOOK_AUTH_SUCCESS") {
         const { accessToken, expiresAt, userId, userName } = event.data;
         const newState: FacebookAuthState = {

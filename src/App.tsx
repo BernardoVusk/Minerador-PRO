@@ -15,6 +15,7 @@ import { AudienceDossierPanel } from "./components/AudienceDossierPanel";
 import { FunnelBuilderPanel } from "./components/FunnelBuilderPanel";
 import { PlaybookPanel } from "./components/PlaybookPanel";
 import { IntegrationsPanel } from "./components/IntegrationsPanel";
+import { FacebookCallbackHandler } from "./components/FacebookCallbackHandler";
 import { LandingScreen } from "./components/LandingScreen";
 import { useAuth } from "./hooks/useAuth";
 import { isSupabaseConfigured } from "./lib/supabase";
@@ -169,6 +170,12 @@ function isRealCommercialOffer(hit: OfferHit): boolean {
 }
 
 export default function App() {
+  const isFacebookCallback = window.location.pathname === "/auth/facebook/callback";
+
+  if (isFacebookCallback) {
+    return <FacebookCallbackHandler />;
+  }
+
   const { isAuthenticated, isChecking, authenticate } = useAuth();
   const [showApp, setShowApp] = useState(false);
 

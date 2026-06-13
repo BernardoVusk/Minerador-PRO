@@ -482,21 +482,19 @@ const FB_APP_SECRET = process.env.FACEBOOK_APP_SECRET || "";
 const FB_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI || 
   "https://vuskoperation.netlify.app/auth/facebook/callback";
 
-app.get("/auth/facebook/callback", async (req, res) => {
+// GET /api/facebook/exchange-code
+// Recebe o code do React callback handler e troca pelos tokens
+app.get("/api/facebook/exchange-code", async (req, res) => {
   const code = req.query.code as string | undefined;
-  const error = req.query.error as string | undefined;
 
-  if (error || !code) {
-    return res.send(`
-      <html><body><script>
-        window.opener.postMessage(
-          { type: "FACEBOOK_AUTH_ERROR", error: "${error || 'Autorização cancelada'}" },
-          "*"
-        );
-        window.close();
-      </script></body></html>
-    `);
+  if (!code) {
+    return res.status(400).json({ success: false, error: "code obrigatório" });
   }
+
+  const FB_APP_ID = process.env.FACEBOOK_APP_ID || "1297847892562716";
+  const FB_APP_SECRET = process.env.FACEBOOK_APP_SECRET || "";
+  const FB_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI ||
+    "https://vuskoperation.netlify.app/auth/facebook/callback";
 
   try {
     // Passo 1: Trocar code por token curto
@@ -510,7 +508,7 @@ app.get("/auth/facebook/callback", async (req, res) => {
     const tokenData = (await tokenRes.json()) as any;
 
     if (tokenData.error) {
-      throw new Error(tokenData.error.message);
+      throw new Error(tokenData.error.message || "Erro ao obter token curto");
     }
 
     const shortToken = tokenData.access_token;
@@ -526,58 +524,33 @@ app.get("/auth/facebook/callback", async (req, res) => {
     const longTokenData = (await longTokenRes.json()) as any;
 
     if (longTokenData.error) {
-      throw new Error(longTokenData.error.message);
+      throw new Error(longTokenData.error.message || "Erro ao obter token longo");
     }
 
     const longToken = longTokenData.access_token;
-    const expiresIn = longTokenData.expires_in; // segundos (~5184000 = 60 dias)
+    const expiresIn = longTokenData.expires_in || 5184000;
     const expiresAt = Date.now() + (expiresIn * 1000);
 
-    // Passo 3: Buscar nome do usuário
+    // Passo 3: Buscar dados do usuário
     const userRes = await fetch(
       `https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${longToken}`
     );
     const userData = (await userRes.json()) as any;
 
-    // Passo 4: Retornar HTML que fecha popup e envia token para janela pai
-    return res.send(`
-      <html>
-        <head><title>Conectando...</title></head>
-        <body style="background:#060607;color:white;font-family:sans-serif;
-          display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
-          <div style="text-align:center">
-            <div style="width:12px;height:12px;border-radius:50%;
-              background:#FF2A2A;margin:0 auto 12px;animation:pulse 1s infinite"></div>
-            <p style="font-size:12px;color:#666">Conectando ao Vusk Operation...</p>
-          </div>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({
-                type: "FACEBOOK_AUTH_SUCCESS",
-                accessToken: "${longToken}",
-                expiresAt: ${expiresAt},
-                userId: "${userData.id || ''}",
-                userName: "${userData.name || ''}"
-              }, "*");
-              setTimeout(() => window.close(), 800);
-            } else {
-              document.body.innerHTML = '<p style="color:red">Erro: janela pai não encontrada.</p>';
-            }
-          </script>
-        </body>
-      </html>
-    `);
+    return res.json({
+      success: true,
+      accessToken: longToken,
+      expiresAt,
+      userId: userData.id || "",
+      userName: userData.name || ""
+    });
 
   } catch (err: any) {
-    return res.send(`
-      <html><body><script>
-        window.opener.postMessage(
-          { type: "FACEBOOK_AUTH_ERROR", error: "${err.message}" },
-          "*"
-        );
-        window.close();
-      </script></body></html>
-    `);
+    console.error("Facebook OAuth exchange error:", err.message);
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Erro interno ao processar autenticação"
+    });
   }
 });
 
