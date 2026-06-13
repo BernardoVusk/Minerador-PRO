@@ -2977,6 +2977,94 @@ app.post("/api/scan", async (req, res) => {
   }
 });
 
+// --- FACEBOOK MARKETING API ROUTES ---
+
+// 1. GET Facebook Account Insights
+app.get("/api/facebook/account-insights", async (req, res) => {
+  const { accessToken, adAccountId, datePreset } = req.query;
+
+  if (!accessToken || !adAccountId) {
+    return res.status(400).json({ success: false, error: "Access Token e ID da Conta de Anúncios são obrigatórios." });
+  }
+
+  const preset = datePreset || "last_7d";
+
+  try {
+    const url = `https://graph.facebook.com/v19.0/${adAccountId}/insights?access_token=${accessToken}&fields=spend,reach,impressions,inline_link_clicks,inline_link_click_ctr,cpm,cpc,actions,purchase_roas&date_preset=${preset}`;
+    const response = await fetch(url);
+    const resJson: any = await response.json();
+
+    if (!response.ok || resJson.error) {
+      const errMsg = resJson.error?.message || "Erro desconhecido na API do Facebook";
+      return res.status(response.status || 400).json({ success: false, error: errMsg });
+    }
+
+    const insights = resJson.data && resJson.data.length > 0 ? resJson.data[0] : null;
+    return res.json({ success: true, data: insights });
+  } catch (err: any) {
+    console.error("Facebook Account Insights API failed:", err);
+    return res.status(500).json({ success: false, error: "Falha na comunicação com a API do Facebook: " + err.message });
+  }
+});
+
+// 2. GET Facebook Campaigns
+app.get("/api/facebook/campaigns", async (req, res) => {
+  const { accessToken, adAccountId, datePreset } = req.query;
+
+  if (!accessToken || !adAccountId) {
+    return res.status(400).json({ success: false, error: "Access Token e ID da Conta de Anúncios são obrigatórios." });
+  }
+
+  const preset = datePreset || "last_7d";
+
+  try {
+    const fields = `id,name,status,insights.date_preset(${preset}){spend,reach,impressions,inline_link_clicks,inline_link_click_ctr,cpm,cpc,actions,purchase_roas}`;
+    const url = `https://graph.facebook.com/v19.0/${adAccountId}/campaigns?access_token=${accessToken}&fields=${encodeURIComponent(fields)}&limit=100`;
+    
+    const response = await fetch(url);
+    const resJson: any = await response.json();
+
+    if (!response.ok || resJson.error) {
+      const errMsg = resJson.error?.message || "Erro desconhecido na API do Facebook";
+      return res.status(response.status || 400).json({ success: false, error: errMsg });
+    }
+
+    return res.json({ success: true, campaigns: resJson.data || [] });
+  } catch (err: any) {
+    console.error("Facebook Campaigns API failed:", err);
+    return res.status(500).json({ success: false, error: "Falha na comunicação com a API do Facebook: " + err.message });
+  }
+});
+
+// 3. GET Facebook Adsets
+app.get("/api/facebook/adsets", async (req, res) => {
+  const { accessToken, campaignId, datePreset } = req.query;
+
+  if (!accessToken || !campaignId) {
+    return res.status(400).json({ success: false, error: "Access Token e ID da Campanha são obrigatórios." });
+  }
+
+  const preset = datePreset || "last_7d";
+
+  try {
+    const fields = `id,name,status,daily_budget,insights.date_preset(${preset}){spend,reach,ctr,cpc}`;
+    const url = `https://graph.facebook.com/v19.0/${campaignId}/adsets?access_token=${accessToken}&fields=${encodeURIComponent(fields)}&limit=100`;
+
+    const response = await fetch(url);
+    const resJson: any = await response.json();
+
+    if (!response.ok || resJson.error) {
+      const errMsg = resJson.error?.message || "Erro desconhecido na API do Facebook";
+      return res.status(response.status || 400).json({ success: false, error: errMsg });
+    }
+
+    return res.json({ success: true, adsets: resJson.data || [] });
+  } catch (err: any) {
+    console.error("Facebook Adsets API failed:", err);
+    return res.status(500).json({ success: false, error: "Falha na comunicação com a API do Facebook: " + err.message });
+  }
+});
+
 // Configure Vite integration for development vs production
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {

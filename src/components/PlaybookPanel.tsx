@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BookOpen, Plus, Trash2, Pencil, Copy, Check, X, AlertTriangle, ChevronUp, ChevronDown, Move } from "lucide-react";
+import { BookOpen, Plus, Trash2, Pencil, Copy, Check, X, AlertTriangle, ChevronUp, ChevronDown, Move, Search, SlidersHorizontal } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
 
@@ -40,6 +40,13 @@ export function PlaybookPanel() {
   const [isSaving, setIsSaving] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
+  // Advanced search states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInTitle, setSearchInTitle] = useState(true);
+  const [searchInSteps, setSearchInSteps] = useState(true);
+  const [searchMatchAll, setSearchMatchAll] = useState(true);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+
   // Copy states
   const [copyState, setCopyState] = useState<Record<string, boolean>>({});
   const [copyAllSuccess, setCopyAllSuccess] = useState(false);
@@ -47,6 +54,43 @@ export function PlaybookPanel() {
   // Modal temporary fields
   const [modalTitulo, setModalTitulo] = useState("");
   const [modalPassos, setModalPassos] = useState<PlaybookPasso[]>([]);
+
+  // Parse query into lowercase keywords for word-by-word advanced precision search
+  const keywords = searchQuery
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(k => k.length > 0);
+
+  const filteredPlaybooks = playbooks.filter(pb => {
+    if (keywords.length === 0) return true;
+
+    const titleMatch = pb.titulo.toLowerCase();
+    
+    const stepsTextList: string[] = [];
+    if (searchInSteps) {
+      pb.passos.forEach(p => {
+        if (p.titulo) stepsTextList.push(p.titulo.toLowerCase());
+        if (p.conteudo) stepsTextList.push(p.conteudo.toLowerCase());
+      });
+    }
+
+    const checkWordMatch = (word: string) => {
+      let matched = false;
+      if (searchInTitle && titleMatch.includes(word)) {
+        matched = true;
+      }
+      if (searchInSteps && !matched) {
+        matched = stepsTextList.some(text => text.includes(word));
+      }
+      return matched;
+    };
+
+    if (searchMatchAll) {
+      return keywords.every(word => checkWordMatch(word));
+    } else {
+      return keywords.some(word => checkWordMatch(word));
+    }
+  });
 
   // Load playbooks on mount
   useEffect(() => {
@@ -382,6 +426,137 @@ export function PlaybookPanel() {
             </button>
           </div>
 
+          {/* Advanced Search Bar Block */}
+          <div className="p-3 border-b border-white/5 bg-black/10 space-y-2 select-none">
+            <div className="relative flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Pesquisa avançada..."
+                  className="w-full bg-[#111113] border border-white/5 rounded-xl pl-9 pr-8 py-2 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all font-sans"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white p-0.5 cursor-pointer"
+                    title="Limpar pesquisa"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+                className={`p-2 rounded-xl border transition-all duration-200 flex items-center justify-center shrink-0 cursor-pointer ${
+                  showAdvancedOptions || !searchInTitle || !searchInSteps || !searchMatchAll
+                    ? "bg-primary/10 border-primary/30 text-primary hover:bg-primary/20 animate-pulse"
+                    : "bg-[#111113] border-white/5 text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.02]"
+                }`}
+                title="Opções de Pesquisa Avançada"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Advanced Filters Drawer Panel */}
+            <AnimatePresence>
+              {showAdvancedOptions && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden bg-[#0d0d0f] border border-white/5 rounded-xl p-3 space-y-3"
+                >
+                  {/* Search in fields options */}
+                  <div className="space-y-1.5">
+                    <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest font-mono block">
+                      Pesquisar Em:
+                    </span>
+                    <div className="flex flex-col gap-2">
+                      <label className="flex items-center gap-2 text-[10px] text-zinc-400 cursor-pointer hover:text-zinc-350 select-none">
+                        <input
+                          type="checkbox"
+                          checked={searchInTitle}
+                          onChange={(e) => {
+                            setSearchInTitle(e.target.checked);
+                            // Avoid having both unchecked
+                            if (!e.target.checked && !searchInSteps) {
+                              setSearchInSteps(true);
+                            }
+                          }}
+                          className="accent-primary w-3.5 h-3.5 rounded border-white/10 bg-[#141416] text-primary cursor-pointer"
+                        />
+                        <span>Título do Playbook</span>
+                      </label>
+                      <label className="flex items-center gap-2 text-[10px] text-zinc-400 cursor-pointer hover:text-zinc-250 select-none">
+                        <input
+                          type="checkbox"
+                          checked={searchInSteps}
+                          onChange={(e) => {
+                            setSearchInSteps(e.target.checked);
+                            // Avoid having both unchecked
+                            if (!e.target.checked && !searchInTitle) {
+                              setSearchInTitle(true);
+                            }
+                          }}
+                          className="accent-primary w-3.5 h-3.5 rounded border-white/10 bg-[#141416] text-primary cursor-pointer"
+                        />
+                        <span>Conteúdo de Passos</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Word match method options */}
+                  <div className="space-y-2 pt-2 border-t border-white/[0.04]">
+                    <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest font-mono block">
+                      Critério de Palavras:
+                    </span>
+                    <div className="grid grid-cols-2 gap-1 bg-[#141416] p-0.5 rounded-lg border border-white/5">
+                      <button
+                        onClick={() => setSearchMatchAll(true)}
+                        className={`text-[9px] py-1 px-1.5 rounded-md font-semibold font-mono tracking-wide transition-all cursor-pointer ${
+                          searchMatchAll
+                            ? "bg-primary text-white shadow-sm"
+                            : "text-zinc-500 hover:text-zinc-300 bg-transparent"
+                        }`}
+                      >
+                        TODAS (E)
+                      </button>
+                      <button
+                        onClick={() => setSearchMatchAll(false)}
+                        className={`text-[9px] py-1 px-1.5 rounded-md font-semibold font-mono tracking-wide transition-all cursor-pointer ${
+                          !searchMatchAll
+                            ? "bg-primary text-white shadow-sm"
+                            : "text-zinc-500 hover:text-zinc-300 bg-transparent"
+                        }`}
+                      >
+                        QUALQUER (OU)
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            
+            {/* Search active results feedback */}
+            {searchQuery && (
+              <div className="flex items-center justify-between text-[9px] text-zinc-500 font-mono px-0.5 pt-1">
+                <span>{filteredPlaybooks.length} correspondência{filteredPlaybooks.length === 1 ? "" : "s"}</span>
+                <button
+                  onClick={() => {
+                    setSearchQuery("");
+                  }}
+                  className="text-primary hover:underline cursor-pointer font-bold"
+                >
+                  Limpar
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="flex-1 overflow-y-auto max-h-[350px] lg:max-h-[600px] p-3 space-y-1.5 custom-scrollbar">
             {isLoading ? (
               <div className="py-12 text-center text-xs text-zinc-500 animate-pulse">
@@ -404,8 +579,29 @@ export function PlaybookPanel() {
                   Criar Primeiro Playbook
                 </button>
               </div>
+            ) : filteredPlaybooks.length === 0 ? (
+              <div className="py-10 px-4 text-center flex flex-col items-center justify-center space-y-3 bg-[#141416]/20 border border-white/5 rounded-2xl">
+                <Search className="w-6 h-6 text-zinc-650" />
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-zinc-400">Nenhum resultado</p>
+                  <p className="text-[10px] text-zinc-600 max-w-[165px] leading-relaxed mx-auto">
+                    Nenhum playbook corresponde aos seus filtros de busca por palavra.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setSearchQuery("");
+                    setSearchInTitle(true);
+                    setSearchInSteps(true);
+                    setSearchMatchAll(true);
+                  }}
+                  className="px-3 py-1.5 bg-white/5 border border-white/10 hover:bg-white/10 text-[10px] font-bold rounded-xl uppercase tracking-wider text-zinc-300 transition-all cursor-pointer"
+                >
+                  Redefinir Busca
+                </button>
+              </div>
             ) : (
-              playbooks.map(pb => (
+              filteredPlaybooks.map(pb => (
                 <button
                   key={pb.id}
                   onClick={() => {
