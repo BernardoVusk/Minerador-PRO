@@ -118,7 +118,7 @@ export function AIAgentsPanel() {
 
       // Select first agent by default
       if (combined.length > 0 && !selectedAgent) {
-        handleSelectAgent(combined[0]);
+        handleSelectAgent(combined[0], "remote");
       }
     } catch (err: any) {
       console.warn("Agentes: Falha na conexão com tabelas do Supabase. Usando LocalStorage. Motivo:", err.message);
@@ -141,24 +141,26 @@ export function AIAgentsPanel() {
         const parsed = JSON.parse(cached);
         setAgents([...parsed, ...DEFAULT_SEED_AGENTS]);
         if (parsed.length > 0 && !selectedAgent) {
-          handleSelectAgent(parsed[0]);
+          handleSelectAgent(parsed[0], "local");
         }
       } catch {
         setAgents(DEFAULT_SEED_AGENTS);
-        handleSelectAgent(DEFAULT_SEED_AGENTS[0]);
+        handleSelectAgent(DEFAULT_SEED_AGENTS[0], "local");
       }
     } else {
       setAgents(DEFAULT_SEED_AGENTS);
-      handleSelectAgent(DEFAULT_SEED_AGENTS[0]);
+      handleSelectAgent(DEFAULT_SEED_AGENTS[0], "local");
     }
   };
 
-  const handleSelectAgent = async (agent: Agent) => {
+  const handleSelectAgent = async (agent: Agent, modeOverride?: "local" | "remote") => {
     setSelectedAgent(agent);
     setMessages([]);
     setCurrentSession(null);
 
-    if (localMode === "local") {
+    const activeMode = modeOverride || localMode;
+
+    if (activeMode === "local") {
       // Find or create local session for this agent
       const cachedSessions = localStorage.getItem("minerador_pro_ai_sessions");
       let localSessions: ChatSession[] = [];
@@ -268,7 +270,7 @@ export function AIAgentsPanel() {
         
         // Update local agents state instantly!
         setAgents([...updated, ...DEFAULT_SEED_AGENTS]);
-        handleSelectAgent(newAgent);
+        handleSelectAgent(newAgent, "local");
       } else {
         // Remote Supabase upload
         if (!supabase) return;
@@ -330,7 +332,7 @@ export function AIAgentsPanel() {
 
           // Prepend newly created agent to list instantly in React state!
           setAgents(prev => [newAgent, ...prev]);
-          handleSelectAgent(newAgent);
+          handleSelectAgent(newAgent, "remote");
         }
       }
     } catch (err: any) {
