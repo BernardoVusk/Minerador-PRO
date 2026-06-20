@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
 import imageCompression from "browser-image-compression";
+import { cleanMetadataAndVaryHash } from "../lib/imageVariation";
 
 // SQL creation script that the developer can paste into the SQL editor
 export const VAULT_SQL_SCRIPT = `-- 1. Crie a tabela de criativos
@@ -144,6 +145,7 @@ export function CreativeVault() {
     const cleanName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
     setCreativeName(cleanName);
 
+    let baseFile: File = file;
     try {
       // Configuration for super-efficient browser-image-compression
       const options = {
@@ -153,33 +155,42 @@ export function CreativeVault() {
         fileType: "image/webp" // Convert all PNG, JPEG, GIF outputs to high efficiency WebP
       };
 
-      const compressedResult = await imageCompression(file, options);
-      const compressedSizeInKb = compressedResult.size / 1024;
-      
-      setCompressedFile(compressedResult);
-      setFinalSize(compressedSizeInKb);
-      
-      const ratio = 100 - (compressedSizeInKb / sizeInKb) * 100;
-      setCompressionRatio(ratio > 0 ? ratio : 0);
-
-      // Show preview
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPreviewUrl(reader.result as string);
-      };
-      reader.readAsDataURL(compressedResult);
+      baseFile = await imageCompression(file, options);
     } catch (err: any) {
-      console.error("Local compression failed:", err);
-      // Fallback to original
-      setCompressedFile(file);
-      setFinalSize(sizeInKb);
-      setCompressionRatio(0);
-      
+      console.error("Local compression failed, usando arquivo original antes da limpeza de metadados:", err);
+    }
+
+    try {
+      // Limpa EXIF/GPS/device e varia o hash de conteúdo (ver lib/imageVariation.ts)
+      const cleanedBlob = await cleanMetadataAndVaryHash(baseFile, "image/webp");
+      const cleanedFile = new File(
+        [cleanedBlob],
+        baseFile.name.replace(/\.[^.]+$/, "") + ".webp",
+        { type: "image/webp" }
+      );
+      const finalSizeInKb = cleanedFile.size / 1024;
+
+      setCompressedFile(cleanedFile);
+      setFinalSize(finalSizeInKb);
+      setCompressionRatio(Math.max(0, 100 - (finalSizeInKb / sizeInKb) * 100));
+
       const reader = new FileReader();
       reader.onloadend = () => {
         setPreviewUrl(reader.result as string);
       };
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(cleanedFile);
+    } catch (err: any) {
+      console.error("Metadata cleanup failed, usando arquivo sem limpeza:", err);
+      const finalSizeInKb = baseFile.size / 1024;
+      setCompressedFile(baseFile);
+      setFinalSize(finalSizeInKb);
+      setCompressionRatio(Math.max(0, 100 - (finalSizeInKb / sizeInKb) * 100));
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreviewUrl(reader.result as string);
+      };
+      reader.readAsDataURL(baseFile);
     } finally {
       setIsCompressing(false);
     }

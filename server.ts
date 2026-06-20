@@ -3,15 +3,44 @@ import path from "path";
 import dns from "dns";
 import http from "http";
 import https from "https";
+import crypto from "crypto";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
-dotenv.config();
+dotenv.config({ path: [".env.local", ".env"] });
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// AUTH: senha do operador validada no servidor contra hash em variável de ambiente
+// (nunca fica em texto plano no bundle do client, diferente da versão anterior).
+function getOperatorPasswordHash(operator: string): string | undefined {
+  return process.env[`AUTH_HASH_${operator.toUpperCase()}`];
+}
+
+function verifyOperatorPassword(password: string, storedHash: string): boolean {
+  const [salt, hashHex] = storedHash.split(":");
+  if (!salt || !hashHex) return false;
+  const derivedKey = crypto.scryptSync(password, salt, 64);
+  const storedKey = Buffer.from(hashHex, "hex");
+  return derivedKey.length === storedKey.length && crypto.timingSafeEqual(derivedKey, storedKey);
+}
+
+app.post("/api/auth/login", (req, res) => {
+  const { operator, password } = req.body;
+  if (!operator || !password) {
+    return res.status(400).json({ success: false, error: "Operador e senha são obrigatórios." });
+  }
+
+  const storedHash = getOperatorPasswordHash(operator);
+  if (!storedHash || !verifyOperatorPassword(password, storedHash)) {
+    return res.status(401).json({ success: false, error: "Senha incorreta." });
+  }
+
+  return res.json({ success: true, operator });
+});
 
 // Lazy-initialized Gemini Client with strict support for new "AQ" keys and classic "AIzaSy" keys
 function getGemini(customKey?: string): GoogleGenAI | null {

@@ -37,32 +37,37 @@ export function LandingScreen({ onAuthenticated }: LandingScreenProps) {
     setSelectedOperator(null);
   };
 
-  const verifyPassword = () => {
+  const verifyPassword = async () => {
     if (!selectedOperator) {
       setErrorMsg("Selecione seu nome para continuar.");
       setShowError(true);
       return;
     }
 
-    const OPERATORS: Record<string, string> = {
-      "Bernardo": "adminvusk",
-      "Gabriel": "vusk10"
-    };
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator: selectedOperator, password: passwordValue.trim() }),
+      });
+      const data = await response.json();
 
-    const expectedPassword = OPERATORS[selectedOperator];
-
-    if (passwordValue.trim() === expectedPassword) {
-      onAuthenticated(selectedOperator);
-    } else {
-      setIsShaking(true);
-      setErrorMsg("Senha incorreta. Tente novamente.");
-      setShowError(true);
-      setPasswordValue("");
-      setTimeout(() => {
-        setIsShaking(false);
-        passwordInputRef.current?.focus();
-      }, 500);
+      if (data.success) {
+        onAuthenticated(selectedOperator);
+        return;
+      }
+      setErrorMsg(data.error || "Senha incorreta. Tente novamente.");
+    } catch {
+      setErrorMsg("Não foi possível verificar a senha. Tente novamente.");
     }
+
+    setIsShaking(true);
+    setShowError(true);
+    setPasswordValue("");
+    setTimeout(() => {
+      setIsShaking(false);
+      passwordInputRef.current?.focus();
+    }, 500);
   };
 
   const handleVerifySubmit = (e?: React.FormEvent) => {
@@ -76,12 +81,7 @@ export function LandingScreen({ onAuthenticated }: LandingScreenProps) {
 
     setIsVerifying(true);
     setShowError(false);
-
-    // Simulate luxury 600ms check delay for realistic security feedback
-    setTimeout(() => {
-      setIsVerifying(false);
-      verifyPassword();
-    }, 600);
+    verifyPassword().finally(() => setIsVerifying(false));
   };
 
   return (

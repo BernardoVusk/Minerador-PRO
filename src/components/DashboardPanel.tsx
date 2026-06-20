@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Search, Download, Camera, Eye, Loader2, RefreshCcw, Sparkles } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Search, Download, Camera, Eye, Loader2, RefreshCcw, Sparkles, ChevronLeft, ChevronRight } from "lucide-react";
 import { OfferHit } from "../types";
 import { UrlConnectionStatus } from "./UrlConnectionStatus";
 
@@ -61,6 +61,10 @@ export function DashboardPanel({ offerHits, setOfferHits }: DashboardPanelProps)
   const [selectedTypeGroup, setSelectedTypeGroup] = useState("all");
   const [sortBy, setSortBy] = useState("score-desc");
 
+  // Pagination: evita renderizar centenas/milhares de linhas em memória de uma vez (trava em mobile)
+  const PAGE_SIZE = 25;
+  const [currentPage, setCurrentPage] = useState(1);
+
   // Screenshot Modal state
   const [activeScreenshot, setActiveScreenshot] = useState<OfferHit | null>(null);
 
@@ -105,6 +109,14 @@ export function DashboardPanel({ offerHits, setOfferHits }: DashboardPanelProps)
     }
     return 0;
   });
+
+  // Volta para a página 1 sempre que filtros ou ordenação mudarem
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedNiche, selectedMarket, selectedRank, selectedFunnel, selectedTypeGroup, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedHits.length / PAGE_SIZE));
+  const paginatedHits = sortedHits.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const countStats = {
     total: filteredHits.length,
@@ -403,7 +415,7 @@ export function DashboardPanel({ offerHits, setOfferHits }: DashboardPanelProps)
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline text-xs text-ink-primary/80">
-                {sortedHits.map((hit) => {
+                {paginatedHits.map((hit) => {
                   let badgeColors = "text-systemGreen bg-systemGreen/10 border border-systemGreen/25 rounded-mac-sm";
                   if (hit.rank === "A") badgeColors = "text-primary bg-primary/10 border border-primary/25 rounded-mac-sm";
                   if (hit.rank === "B") badgeColors = "text-systemYellow bg-systemYellow/10 border border-systemYellow/25 rounded-mac-sm";
@@ -486,7 +498,7 @@ export function DashboardPanel({ offerHits, setOfferHits }: DashboardPanelProps)
 
           {/* Mobile visible layout layout */}
           <div className="block md:hidden divide-y divide-hairline">
-            {sortedHits.map((hit) => {
+            {paginatedHits.map((hit) => {
               let badgeColors = "text-systemGreen bg-systemGreen/10 border border-systemGreen/25 rounded-mac-sm";
               if (hit.rank === "A") badgeColors = "text-primary bg-primary/10 border border-primary/25 rounded-mac-sm";
               if (hit.rank === "B") badgeColors = "text-systemYellow bg-systemYellow/10 border border-systemYellow/25 rounded-mac-sm";
@@ -548,6 +560,31 @@ export function DashboardPanel({ offerHits, setOfferHits }: DashboardPanelProps)
               );
             })}
           </div>
+
+          {/* Paginação: navega entre páginas de PAGE_SIZE itens sem carregar tudo de uma vez */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-t border-hairline select-none">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="mac-btn-secondary text-white text-[10px] font-bold uppercase tracking-wider px-3 py-2.5 flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" /> Anterior
+              </button>
+
+              <span className="text-[10px] text-ink-tertiary font-mono font-bold uppercase tracking-wider">
+                Página {currentPage} de {totalPages}
+              </span>
+
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="mac-btn-secondary text-white text-[10px] font-bold uppercase tracking-wider px-3 py-2.5 flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Próxima <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 
