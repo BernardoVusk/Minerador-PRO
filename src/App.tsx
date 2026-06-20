@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Activity, LayoutDashboard, Cpu, BookOpen, Heart, Coffee, RefreshCcw, Database, FolderHeart, Menu, X, Radio, Bot, Zap, Users, Layers, Plug2 } from "lucide-react";
+import { Activity, LayoutDashboard, Cpu, BookOpen, Heart, Coffee, RefreshCcw, Database, FolderHeart, Menu, X, Radio, Bot, Zap, Users, Layers, Plug2, ShieldCheck } from "lucide-react";
 import { OfferHit, Tracker } from "./types";
 import { FALLBACK_TRACKERS } from "./constants/fallbackTrackers";
 import { MiningPanel } from "./components/MiningPanel";
@@ -11,6 +11,7 @@ import { CreativeVault } from "./components/CreativeVault";
 import { MetaAdsRadar } from "./components/MetaAdsRadar";
 import { AIAgentsPanel } from "./components/AIAgentsPanel";
 import { CopyAnglesPanel } from "./components/CopyAnglesPanel";
+import { ComplianceCheckerPanel } from "./components/ComplianceCheckerPanel";
 import { AudienceDossierPanel } from "./components/AudienceDossierPanel";
 import { FunnelBuilderPanel } from "./components/FunnelBuilderPanel";
 import { PlaybookPanel } from "./components/PlaybookPanel";
@@ -191,7 +192,7 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
-  const [activeTab, setActiveTab] = useState<"mining" | "vault" | "radar" | "playbooks" | "agents" | "angles" | "audience" | "funnel" | "help" | "integrations">("mining");
+  const [activeTab, setActiveTab] = useState<"mining" | "vault" | "radar" | "playbooks" | "agents" | "angles" | "audience" | "funnel" | "compliance" | "help" | "integrations">("mining");
   const [apiKey, setApiKey] = useState("");
   const [days, setDays] = useState(30);
   const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
@@ -437,6 +438,24 @@ export default function App() {
                 IA
               </span>
             </button>
+
+            <button
+              onClick={() => setActiveTab("compliance")}
+              id="tab-compliance"
+              className={`w-full px-4 py-3 rounded-mac-md text-xs font-sans font-semibold tracking-wide transition-all duration-200 flex items-center justify-between cursor-pointer select-none border ${
+                activeTab === "compliance"
+                  ? "bg-primary/15 border-primary/25 text-white shadow-[0_0_20px_rgba(255,69,58,0.15)] font-bold"
+                  : "text-zinc-400 border-transparent hover:text-white hover:bg-white/[0.05] hover:border-white/5"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <ShieldCheck className="w-4 h-4 shrink-0 text-primary transition-colors duration-200" />
+                <span>Compliance</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded bg-primary text-[8px] font-bold text-white uppercase font-mono tracking-wider select-none shrink-0 transform scale-90">
+                IA
+              </span>
+            </button>
           </div>
 
           <div className="h-px bg-white/[0.04] my-2" />
@@ -599,7 +618,8 @@ export default function App() {
                   { id: "agents", label: "Agentes IA", icon: Bot },
                   { id: "audience", label: "Público-Alvo", icon: Users },
                   { id: "funnel", label: "Criador de Funil", icon: Layers },
-                  { id: "angles", label: "Ângulos de Copy", icon: Zap }
+                  { id: "angles", label: "Ângulos de Copy", icon: Zap },
+                  { id: "compliance", label: "Compliance", icon: ShieldCheck }
                 ]
               },
               {
@@ -771,6 +791,8 @@ export default function App() {
             {activeTab === "funnel" && <FunnelBuilderPanel />}
 
             {activeTab === "angles" && <CopyAnglesPanel />}
+
+            {activeTab === "compliance" && <ComplianceCheckerPanel />}
 
             {activeTab === "help" && <HelpPanel />}
 

@@ -2921,6 +2921,135 @@ Você deve responder rigorosamente no formato de JSON definido pelas propriedade
   }
 });
 
+// Compliance Pre-Flight Checker: analisa copy (texto) e/ou criativo (imagem) contra as
+// categorias de risco mais comuns de reprovação nas políticas públicas de Meta/Google Ads
+// para ofertas de saúde/emagrecimento/financeiro/renda extra, e sugere reescrita compliant.
+const COMPLIANCE_RISK_KEYWORDS: { categoria: string; termos: string[] }[] = [
+  { categoria: "Alegação de cura/saúde", termos: ["cura", "curado", "cura definitiva", "elimina a doença", "tratamento médico"] },
+  { categoria: "Garantia de resultado", termos: ["garantido", "garantia de resultado", "100% garantido", "resultado garantido", "funciona para todos"] },
+  { categoria: "Claim numérico de emagrecimento", termos: ["emagreça", "perca", "kg em", "secar", "elimine a barriga"] },
+  { categoria: "Linguagem milagrosa/sensacionalista", termos: ["milagre", "milagroso", "segredo proibido", "a indústria não quer que você saiba"] },
+  { categoria: "Urgência/escassez falsa", termos: ["últimas vagas", "sai do ar em minutos", "só hoje", "vagas se esgotando"] },
+  { categoria: "Promessa financeira irreal", termos: ["renda garantida", "fique rico", "ganhe r$", "lucro garantido"] }
+];
+
+function runHeuristicComplianceCheck(text: string) {
+  const lowerText = text.toLowerCase();
+  const flags: { trecho: string; categoria: string; motivo: string; sugestao: string }[] = [];
+
+  for (const group of COMPLIANCE_RISK_KEYWORDS) {
+    for (const termo of group.termos) {
+      if (lowerText.includes(termo)) {
+        flags.push({
+          trecho: termo,
+          categoria: group.categoria,
+          motivo: `Termo "${termo}" é frequentemente associado a reprovação por políticas de anúncios (${group.categoria}).`,
+          sugestao: "Reescreva evitando promessas absolutas; use linguagem de possibilidade (\"pode ajudar\", \"método utilizado por\") em vez de garantia categórica."
+        });
+        break;
+      }
+    }
+  }
+
+  const riskLevel = flags.length === 0 ? "baixo" : flags.length <= 2 ? "médio" : "alto";
+  return {
+    riskLevel,
+    summary: flags.length === 0
+      ? "Nenhum termo de alto risco encontrado na varredura heurística (sem chave Gemini configurada, análise simplificada por palavras-chave)."
+      : `${flags.length} termo(s) de risco encontrado(s) na varredura heurística (sem chave Gemini configurada, análise simplificada por palavras-chave).`,
+    flags,
+    rewriteSugerido: null as string | null
+  };
+}
+
+app.post("/api/compliance-check", async (req, res) => {
+  const { text, imageBase64, imageMimeType } = req.body;
+
+  if (!text && !imageBase64) {
+    return res.status(400).json({ success: false, error: "Envie um texto de copy ou uma imagem de criativo para analisar." });
+  }
+
+  const ai = getGeminiFromReq(req);
+
+  if (!ai) {
+    if (!text) {
+      return res.json({
+        success: true,
+        simulated: true,
+        result: {
+          riskLevel: "médio",
+          summary: "Análise de imagem requer GEMINI_API_KEY configurada. Configure a chave para varredura visual real.",
+          flags: [],
+          rewriteSugerido: null
+        }
+      });
+    }
+    return res.json({ success: true, simulated: true, result: runHeuristicComplianceCheck(text) });
+  }
+
+  try {
+    const parts: any[] = [];
+    if (imageBase64) {
+      let base64Data = imageBase64;
+      if (base64Data.includes(";base64,")) {
+        base64Data = base64Data.split(";base64,").pop() || "";
+      }
+      parts.push({ inlineData: { mimeType: imageMimeType || "image/png", data: base64Data } });
+    }
+
+    const promptText = `Você é um especialista em compliance de anúncios (Meta Ads e Google Ads) para o mercado brasileiro de infoprodutos/low ticket em nichos de saúde, emagrecimento, finanças e renda extra.
+
+Analise ${imageBase64 ? "a imagem de criativo enviada" : ""}${imageBase64 && text ? " e o texto de copy enviado" : ""}${!imageBase64 && text ? "o texto de copy enviado" : ""} abaixo e identifique riscos de reprovação contra as políticas públicas do Meta (Inadequate/Egregious Content, Personal Health, Unrealistic outcomes, Before/After, Misleading claims) e do Google Ads.
+
+${text ? `TEXTO DE COPY:\n"""${text}"""` : ""}
+
+Para cada problema encontrado (claim de cura/saúde sem comprovação, garantia de resultado, número específico de emagrecimento/tempo, antes/depois proibido, linguagem milagrosa, urgência/escassez falsa, promessa financeira irreal, etc.), aponte o trecho ou elemento visual exato, a categoria de risco, o motivo da reprovação provável, e uma sugestão de reescrita que mantenha o apelo persuasivo dentro da política.
+
+Se houver texto de copy, gere também uma versão integral reescrita ("rewriteSugerido") que resolve todos os pontos de risco mantendo o máximo de poder de persuasão permitido pelas políticas.
+
+Classifique o riskLevel geral como "baixo", "médio" ou "alto".`;
+
+    parts.push({ text: promptText });
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: [{ role: "user", parts }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            riskLevel: { type: Type.STRING },
+            summary: { type: Type.STRING },
+            flags: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  trecho: { type: Type.STRING },
+                  categoria: { type: Type.STRING },
+                  motivo: { type: Type.STRING },
+                  sugestao: { type: Type.STRING }
+                },
+                required: ["trecho", "categoria", "motivo", "sugestao"]
+              }
+            },
+            rewriteSugerido: { type: Type.STRING }
+          },
+          required: ["riskLevel", "summary", "flags"]
+        }
+      }
+    });
+
+    const responseText = response.text || "{}";
+    const data = JSON.parse(responseText);
+    return res.json({ success: true, simulated: false, result: data });
+  } catch (err: any) {
+    console.error("Gemini Compliance Check execution failed:", err);
+    return res.status(500).json({ success: false, error: "Falha ao verificar compliance com IA: " + err.message });
+  }
+});
+
 // Endpoint for real-time online status testing (avoiding NXDOMAIN and connection refused errors)
 app.post("/api/check-status", async (req, res) => {
   const { url } = req.body;
