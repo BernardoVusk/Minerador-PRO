@@ -12,7 +12,8 @@ dotenv.config({ path: [".env.local", ".env"] });
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+// Limite alto pois /api/agents/chat e /api/compliance-check aceitam imagens em base64 (~1.37x o tamanho original)
+app.use(express.json({ limit: "15mb" }));
 
 // AUTH: senha do operador validada no servidor contra hash em variável de ambiente
 // (nunca fica em texto plano no bundle do client, diferente da versão anterior).
@@ -3355,6 +3356,19 @@ app.get("/api/facebook/adsets", async (req, res) => {
     console.error("Facebook Adsets API failed:", err);
     return res.status(500).json({ success: false, error: "Falha na comunicação com a API do Facebook: " + err.message });
   }
+});
+
+// Garante JSON mesmo em erros de middleware (ex: payload acima do limite), evitando que o
+// client receba a página HTML padrão de erro do Express e quebre o JSON.parse da resposta.
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({ success: false, error: "Arquivo/payload muito grande para esta requisição." });
+  }
+  if (err) {
+    console.error("Unhandled middleware error:", err);
+    return res.status(400).json({ success: false, error: err.message || "Requisição inválida." });
+  }
+  return next();
 });
 
 // Configure Vite integration for development vs production
