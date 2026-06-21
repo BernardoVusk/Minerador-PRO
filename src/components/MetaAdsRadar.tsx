@@ -1,6 +1,17 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Trash2, Copy, Check, Database, Tag, Sparkles, X, AlertCircle, Info, RefreshCw, Layers, Pencil } from "lucide-react";
+import { Plus, Trash2, Copy, Check, Database, Tag, Sparkles, X, AlertCircle, Info, RefreshCw, Layers, Pencil, Search, ExternalLink, Loader2 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
+import { useFacebookAuth } from "../hooks/useFacebookAuth";
+
+interface AdLibraryAd {
+  id?: string;
+  page_name?: string;
+  ad_creative_bodies?: string[];
+  ad_creative_link_titles?: string[];
+  ad_delivery_start_time?: string;
+  ad_snapshot_url?: string;
+  publisher_platforms?: string[];
+}
 
 interface RadarCategory {
   id: string;
@@ -21,11 +32,20 @@ interface PopulatedCategory extends RadarCategory {
 }
 
 export function MetaAdsRadar() {
+  const { authState: fbAuth, login: fbLogin } = useFacebookAuth();
+
   const [categories, setCategories] = useState<PopulatedCategory[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSqlVisible, setIsSqlVisible] = useState(false);
+
+  // Ad Library real search states (A3.1)
+  const [isAdLibraryModalOpen, setIsAdLibraryModalOpen] = useState(false);
+  const [adLibrarySearchTerm, setAdLibrarySearchTerm] = useState("");
+  const [adLibraryResults, setAdLibraryResults] = useState<AdLibraryAd[]>([]);
+  const [adLibraryLoading, setAdLibraryLoading] = useState(false);
+  const [adLibraryError, setAdLibraryError] = useState("");
 
   // States for category form inside modal
   const [editingCategory, setEditingCategory] = useState<PopulatedCategory | null>(null);
@@ -164,6 +184,33 @@ export function MetaAdsRadar() {
     setTimeout(() => {
       setShowCopyToast(false);
     }, 2500);
+  };
+
+  // Busca real na Ad Library do Meta para uma keyword salva (A3.1)
+  const openAdLibrarySearch = async (term: string) => {
+    setAdLibrarySearchTerm(term);
+    setIsAdLibraryModalOpen(true);
+    setAdLibraryResults([]);
+    setAdLibraryError("");
+
+    if (!fbAuth.accessToken || fbAuth.isExpired) {
+      setAdLibraryError("Conecte sua conta do Facebook para buscar anúncios reais na Ad Library.");
+      return;
+    }
+
+    setAdLibraryLoading(true);
+    try {
+      const res = await fetch(
+        `/api/facebook/ads-library-search?accessToken=${encodeURIComponent(fbAuth.accessToken)}&searchTerms=${encodeURIComponent(term)}&countries=BR`
+      );
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Erro desconhecido na busca.");
+      setAdLibraryResults(data.ads || []);
+    } catch (err: any) {
+      setAdLibraryError(err.message || "Erro ao buscar na Ad Library.");
+    } finally {
+      setAdLibraryLoading(false);
+    }
   };
 
   // Add a keyword to the temporary staging list in modal
@@ -488,25 +535,32 @@ export function MetaAdsRadar() {
                     cat.keywords.map((kw) => {
                       const isCopied = copiedKeywordId === kw.id;
                       return (
-                        <button
+                        <div
                           key={kw.id}
-                          onClick={() => handleCopyKeyword(kw.word, kw.id)}
-                          className={`group relative flex items-center gap-1.5 pl-3 pr-2.5 py-2.5 rounded-mac-md text-[11px] font-sans font-bold tracking-wide border cursor-pointer select-none transition-all active:scale-[0.93] min-h-[38px] ${
+                          className={`group relative flex items-stretch rounded-mac-md text-[11px] font-sans font-bold tracking-wide border select-none transition-all overflow-hidden min-h-[38px] ${
                             isCopied
                               ? "bg-systemGreen/15 border-systemGreen/30 text-systemGreen shadow-[0_0_10px_rgba(48,209,88,0.15)]"
-                              : "bg-surface-raised border border-hairline hover:bg-surface-raised/40 text-ink-secondary hover:text-white"
+                              : "bg-surface-raised border border-hairline text-ink-secondary"
                           }`}
                         >
-                          <Tag className={`w-3 h-3 transition-transform duration-200 group-hover:rotate-12 ${isCopied ? "text-systemGreen" : "text-primary"}`} />
-                          
-                          <span>{kw.word}</span>
-                          
-                          {isCopied ? (
-                            <Check className="w-3 h-3 text-systemGreen animate-scale-in" />
-                          ) : (
-                            <Copy className="w-2.5 h-2.5 text-ink-tertiary opacity-0 group-hover:opacity-100 transition-opacity ml-0.5" />
-                          )}
-                        </button>
+                          <button
+                            onClick={() => handleCopyKeyword(kw.word, kw.id)}
+                            title="Copiar palavra-chave"
+                            className="flex items-center gap-1.5 pl-3 pr-2.5 cursor-pointer active:scale-[0.96] hover:bg-white/5 hover:text-white transition-all"
+                          >
+                            <Tag className={`w-3 h-3 transition-transform duration-200 group-hover:rotate-12 ${isCopied ? "text-systemGreen" : "text-primary"}`} />
+                            <span>{kw.word}</span>
+                            {isCopied && <Check className="w-3 h-3 text-systemGreen animate-scale-in" />}
+                          </button>
+
+                          <button
+                            onClick={() => openAdLibrarySearch(kw.word)}
+                            title="Buscar anúncios reais na Ad Library"
+                            className="flex items-center justify-center px-2.5 border-l border-white/10 text-ink-tertiary hover:text-primary hover:bg-primary/10 cursor-pointer transition-all active:scale-[0.9]"
+                          >
+                            <Search className="w-3 h-3" />
+                          </button>
+                        </div>
                       );
                     })
                   )}
@@ -657,6 +711,96 @@ export function MetaAdsRadar() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* AD LIBRARY REAL SEARCH RESULTS MODAL (A3.1) */}
+      {isAdLibraryModalOpen && (
+        <div className="fixed inset-0 mac-glass z-50 flex items-center justify-center p-4 animate-fade-in font-sans">
+          <div className="w-full max-w-2xl mac-card overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="p-5 border-b border-hairline flex items-center justify-between select-none shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <Search className="w-4 h-4 text-primary shrink-0" />
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider truncate">
+                  Ad Library: "{adLibrarySearchTerm}"
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsAdLibraryModalOpen(false)}
+                className="p-1.5 rounded-mac-sm text-ink-secondary hover:text-white hover:bg-surface-base transition-all cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              {adLibraryLoading ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3">
+                  <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                  <span className="text-xs text-ink-tertiary font-mono">Buscando anúncios reais na Ad Library...</span>
+                </div>
+              ) : adLibraryError ? (
+                <div className="p-4 bg-systemRed/10 border border-systemRed/25 rounded-mac-md text-systemRed text-xs flex flex-col gap-3">
+                  <div className="flex gap-2 items-start">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{adLibraryError}</span>
+                  </div>
+                  {(!fbAuth.accessToken || fbAuth.isExpired) && (
+                    <button
+                      onClick={fbLogin}
+                      className="self-start px-4 py-2 mac-btn-primary text-white text-[10px] font-bold uppercase tracking-wider cursor-pointer"
+                    >
+                      Conectar Facebook
+                    </button>
+                  )}
+                </div>
+              ) : adLibraryResults.length === 0 ? (
+                <div className="text-center py-16 text-xs text-ink-tertiary">
+                  Nenhum anúncio ativo encontrado para esse termo no Brasil agora.
+                </div>
+              ) : (
+                adLibraryResults.map((ad, i) => (
+                  <div key={ad.id || i} className="p-4 bg-surface-raised border border-hairline rounded-mac-md space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-white">{ad.page_name || "Anunciante desconhecido"}</span>
+                      {ad.ad_delivery_start_time && (
+                        <span className="text-[9px] font-mono text-ink-tertiary shrink-0">
+                          desde {new Date(ad.ad_delivery_start_time).toLocaleDateString("pt-BR")}
+                        </span>
+                      )}
+                    </div>
+                    {ad.ad_creative_link_titles?.[0] && (
+                      <p className="text-xs font-semibold text-systemGreen">{ad.ad_creative_link_titles[0]}</p>
+                    )}
+                    {ad.ad_creative_bodies?.[0] && (
+                      <p className="text-[11px] text-ink-secondary leading-relaxed line-clamp-4 whitespace-pre-wrap">
+                        {ad.ad_creative_bodies[0]}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <div className="flex gap-1 flex-wrap">
+                        {(ad.publisher_platforms || []).map((p) => (
+                          <span key={p} className="text-[8px] font-mono uppercase text-ink-tertiary bg-surface-base border border-hairline px-1.5 py-0.5 rounded-mac-sm">
+                            {p}
+                          </span>
+                        ))}
+                      </div>
+                      {ad.ad_snapshot_url && (
+                        <a
+                          href={ad.ad_snapshot_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] text-primary font-bold flex items-center gap-1 hover:underline shrink-0"
+                        >
+                          Ver anúncio <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}

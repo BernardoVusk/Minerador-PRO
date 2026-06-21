@@ -664,6 +664,39 @@ app.get("/api/facebook/token-info", async (req, res) => {
   }
 });
 
+// A3.1: busca real na Ad Library (Graph API /ads_archive). Reaproveita o mesmo accessToken
+// já obtido pelo login Facebook existente (useFacebookAuth) — não exige permissão extra
+// como ads_read para anúncios comerciais (só anúncios de política/eleição exigem verificação de ID).
+app.get("/api/facebook/ads-library-search", async (req, res) => {
+  const accessToken = req.query.accessToken as string | undefined;
+  const searchTerms = req.query.searchTerms as string | undefined;
+  const countries = (req.query.countries as string | undefined) || "BR";
+
+  if (!accessToken) {
+    return res.status(400).json({ success: false, error: "Conecte sua conta do Facebook primeiro para buscar na Ad Library." });
+  }
+  if (!searchTerms) {
+    return res.status(400).json({ success: false, error: "searchTerms obrigatório." });
+  }
+
+  try {
+    const countriesArray = countries.split(",").map((c) => c.trim().toUpperCase()).filter(Boolean);
+    const fields = "ad_creative_bodies,ad_creative_link_titles,page_name,ad_delivery_start_time,ad_snapshot_url,publisher_platforms";
+    const url = `https://graph.facebook.com/v19.0/ads_archive?` +
+      `search_terms=${encodeURIComponent(searchTerms)}&` +
+      `ad_reached_countries=${encodeURIComponent(JSON.stringify(countriesArray))}&` +
+      `fields=${fields}&limit=20&access_token=${accessToken}`;
+
+    const response = await fetch(url);
+    const data = (await response.json()) as any;
+    if (data.error) throw new Error(data.error.message);
+    return res.json({ success: true, ads: data.data || [] });
+  } catch (err: any) {
+    console.error("Ad Library search failed:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Ferramentas (function calling) que qualquer Agente IA pode usar: consultas de leitura sobre
 // criativos/ofertas/playbooks reais do operador (memória/RAG) e ações que alteram dados (A4.1/A4.2).
 const AGENT_TOOLS: any[] = [
