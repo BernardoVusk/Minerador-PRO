@@ -14,6 +14,7 @@ import {
   Workflow,
   Activity
 } from "lucide-react";
+import { AdsAccounts } from "./AdsAccounts";
 
 type AdsSubTab =
   | "dashboard"
@@ -70,7 +71,7 @@ const SUB_TAB_GROUPS: AdsSubTabGroup[] = [
       { id: "conjuntos", label: "Conjuntos", icon: Layers, render: () => <Placeholder label="Conjuntos" /> },
       { id: "anuncios", label: "Anúncios", icon: Image, render: () => <Placeholder label="Anúncios" /> },
       { id: "pixels", label: "Pixels", icon: Target, render: () => <Placeholder label="Pixels" /> },
-      { id: "contas", label: "Contas de Ads", icon: Wallet, render: () => <Placeholder label="Contas de Ads" /> },
+      { id: "contas", label: "Contas de Ads", icon: Wallet, render: () => <AdsAccounts /> },
       { id: "capi", label: "Meta CAPI", icon: Webhook, render: () => <Placeholder label="Meta CAPI" /> }
     ]
   },

@@ -71,6 +71,29 @@ export function useAdsData() {
         }
       };
 
+      const upsert = async (
+        values: Partial<T> | Partial<T>[],
+        onConflict: string
+      ): Promise<AdsTableResult<T[]>> => {
+        if (isSensitive) return sensitiveBlockError<T[]>();
+        if (!supabase) return { success: false, error: "Supabase não configurado." };
+        try {
+          const rows = (Array.isArray(values) ? values : [values]).map((row) => ({
+            ...row,
+            operator
+          }));
+          const { data, error } = await supabase
+            .from(table)
+            .upsert(rows, { onConflict })
+            .select();
+          if (error) throw error;
+          return { success: true, data: (data || []) as T[] };
+        } catch (err: any) {
+          console.error(`[useAdsData] Erro ao upsertar em "${table}":`, err);
+          return { success: false, error: err.message || "Erro ao salvar dados." };
+        }
+      };
+
       const update = async (
         id: string,
         values: Partial<T>
@@ -109,7 +132,7 @@ export function useAdsData() {
         }
       };
 
-      return { list, insert, update, remove };
+      return { list, insert, upsert, update, remove };
     },
     [operator]
   );
