@@ -62,6 +62,20 @@ function variationTone(a: number, b: number): string {
   return "text-ink-tertiary";
 }
 
+// ROAS é null (não 0) quando o período não teve gasto — diferente de "ROAS medido como 0".
+// Por isso a variação de ROAS não pode reaproveitar formatVariationPct(roas || 0, roas || 0)
+// direto: se só o período B não teve gasto, isso coercia para 0 e gera uma % normal e
+// enganosa (ex.: "-100.0%" parecendo queda real de ROAS, quando na verdade B não teve gasto).
+function formatRoasVariationPct(roasA: number | null, roasB: number | null): string {
+  if (roasB === null) return "—";
+  return formatVariationPct(roasA || 0, roasB);
+}
+
+function roasVariationTone(roasA: number | null, roasB: number | null): string {
+  if (roasB === null) return "text-ink-tertiary";
+  return variationTone(roasA || 0, roasB);
+}
+
 // --- Seletor de dois períodos ----------------------------------------------
 
 interface PeriodRangeProps {
@@ -161,8 +175,8 @@ function ComparisonCards({ periodA, periodB }: { periodA: PeriodTotals; periodB:
         label="ROAS"
         valueA={formatRoas(periodA.roas)}
         valueB={formatRoas(periodB.roas)}
-        variation={formatVariationPct(periodA.roas || 0, periodB.roas || 0)}
-        variationToneClassName={variationTone(periodA.roas || 0, periodB.roas || 0)}
+        variation={formatRoasVariationPct(periodA.roas, periodB.roas)}
+        variationToneClassName={roasVariationTone(periodA.roas, periodB.roas)}
         accentClassName="text-systemBlue"
       />
       <ComparisonCard
