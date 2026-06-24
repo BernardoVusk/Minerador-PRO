@@ -4209,6 +4209,70 @@ app.get("/api/ads/attribution/summary", async (req, res) => {
   }
 });
 
+// GET contagem de `tracking_events` por etapa de um funil (para o drop-off na aba "Funis").
+// `operator` é obrigatório e usado tanto para escopar a busca do funil quanto a contagem de
+// eventos — um operador não consegue sondar o funil de outro adivinhando o `id`: se o funil não
+// existir OU pertencer a outro operador, devolvemos o mesmo 404 genérico (mesmo padrão da
+// Task 15), sem distinguir os dois casos.
+app.get("/api/ads/funnel/:id/stats", async (req, res) => {
+  const { id } = req.params;
+  const operator = req.query.operator as string;
+  const from = req.query.from as string | undefined;
+  const to = req.query.to as string | undefined;
+
+  if (!operator) {
+    return res.status(400).json({ success: false, error: "operator é obrigatório." });
+  }
+
+  if (!supabaseServer) {
+    return res.status(500).json({ success: false, error: "Supabase não está configurado no servidor." });
+  }
+
+  try {
+    const { data: funnel, error: funnelErr } = await supabaseServer
+      .from("funnels")
+      .select("id")
+      .eq("id", id)
+      .eq("operator", operator)
+      .maybeSingle();
+    if (funnelErr) throw funnelErr;
+    if (!funnel) {
+      return res.status(404).json({ success: false, error: "Funil não encontrado." });
+    }
+
+    const { data: steps, error: stepsErr } = await supabaseServer
+      .from("funnel_steps")
+      .select("id, name, event_name, step_order")
+      .eq("operator", operator)
+      .eq("funnel_id", id)
+      .order("step_order", { ascending: true });
+    if (stepsErr) throw stepsErr;
+
+    const results = [];
+    for (const step of steps || []) {
+      let count = 0;
+      if (step.event_name) {
+        let query = supabaseServer
+          .from("tracking_events")
+          .select("id", { count: "exact", head: true })
+          .eq("operator", operator)
+          .eq("event_name", step.event_name);
+        if (from) query = query.gte("occurred_at", from);
+        if (to) query = query.lte("occurred_at", to);
+        const { count: stepCount, error: countErr } = await query;
+        if (countErr) throw countErr;
+        count = stepCount || 0;
+      }
+      results.push({ stepId: step.id, name: step.name, eventName: step.event_name, count });
+    }
+
+    return res.json({ success: true, steps: results });
+  } catch (err: any) {
+    console.error("Ads funnel stats failed:", err);
+    return res.status(500).json({ success: false, error: err.message || "Erro ao buscar estatísticas do funil." });
+  }
+});
+
 // Hash SHA256 em hex — usado tanto para `email_hash` (PII nunca armazenada em texto puro)
 // quanto para o `event_id` determinístico do lado webhook (`platform:externalOrderId`).
 function sha256Hex(value: string): string {
