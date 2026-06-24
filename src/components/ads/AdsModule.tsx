@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { AdsAccounts } from "./AdsAccounts";
 import { AdsCampaigns } from "./AdsCampaigns";
+import { AdsAdSets } from "./AdsAdSets";
 
 type AdsSubTab =
   | "dashboard"
@@ -69,7 +70,7 @@ const SUB_TAB_GROUPS: AdsSubTabGroup[] = [
     title: "Meta",
     tabs: [
       { id: "campanhas", label: "Campanhas", icon: Megaphone, render: () => <AdsCampaigns /> },
-      { id: "conjuntos", label: "Conjuntos", icon: Layers, render: () => <Placeholder label="Conjuntos" /> },
+      { id: "conjuntos", label: "Conjuntos", icon: Layers, render: () => <AdsAdSets /> },
       { id: "anuncios", label: "Anúncios", icon: Image, render: () => <Placeholder label="Anúncios" /> },
       { id: "pixels", label: "Pixels", icon: Target, render: () => <Placeholder label="Pixels" /> },
       { id: "contas", label: "Contas de Ads", icon: Wallet, render: () => <AdsAccounts /> },
