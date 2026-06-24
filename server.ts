@@ -7,14 +7,20 @@ import crypto from "crypto";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
+import { checkoutAdapters } from "./server/adapters/checkout";
 
 dotenv.config({ path: [".env.local", ".env"] });
 
 const app = express();
 const PORT = 3000;
 
-// Limite alto pois /api/agents/chat e /api/compliance-check aceitam imagens em base64 (~1.37x o tamanho original)
-app.use(express.json({ limit: "15mb" }));
+// Limite alto pois /api/agents/chat e /api/compliance-check aceitam imagens em base64 (~1.37x o tamanho original).
+// `verify` apenas guarda o buffer bruto em `req.rawBody` (usado pela verificação HMAC do
+// webhook da Kiwify) — não altera o parsing normal de `req.body` para nenhuma rota existente.
+app.use(express.json({
+  limit: "15mb",
+  verify: (req: any, _res, buf) => { req.rawBody = buf; },
+}));
 
 // Cliente Supabase do servidor, usado pelas ferramentas dos Agentes IA (memória/RAG + ações) para
 // ler/escrever dados reais do operador. Mesma anon key pública usada no client: as RLS policies
@@ -3939,6 +3945,221 @@ app.post("/api/ads/webhook-token", async (req, res) => {
   } catch (err: any) {
     console.error("Failed to get/generate webhook token:", err);
     return res.status(500).json({ success: false, error: err.message || "Erro ao gerar token de webhook." });
+  }
+});
+
+// POST cadastra/atualiza o secret de verificação de assinatura de uma plataforma de checkout
+// para o operador (usado pelo adapter daquela plataforma para validar webhooks recebidos).
+// O secret nunca é devolvido na resposta — só confirmação de sucesso/erro.
+app.post("/api/ads/webhook-secret", async (req, res) => {
+  const { operator, platform, secret } = req.body;
+  if (!operator || !platform || !secret) {
+    return res.status(400).json({ success: false, error: "operator, platform e secret são obrigatórios." });
+  }
+
+  if (!supabaseServer) {
+    return res.status(500).json({ success: false, error: "Supabase não está configurado no servidor." });
+  }
+
+  try {
+    const { error: upsertErr } = await supabaseServer
+      .from("webhook_secrets")
+      .upsert([{ operator, platform, secret }], { onConflict: "operator,platform" });
+    if (upsertErr) throw upsertErr;
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error("Failed to upsert webhook secret:", err);
+    return res.status(500).json({ success: false, error: err.message || "Erro ao salvar secret do webhook." });
+  }
+});
+
+// POST recebe webhooks de checkout (Hotmart, Kiwify, ...) e persiste vendas normalizadas.
+// Esta é a rota mais sensível do módulo de Anúncios — qualquer requisição é sempre registrada
+// em `webhook_events_raw` antes de qualquer outra coisa, para auditoria/replay manual, mesmo
+// que a assinatura falhe ou o parse não reconheça o payload. Não dispara CAPI (Task 16).
+app.post("/api/webhooks/checkout/:platform/:operatorToken", async (req, res) => {
+  const { platform, operatorToken } = req.params;
+
+  if (!supabaseServer) {
+    return res.status(500).json({ success: false, error: "Supabase não está configurado no servidor." });
+  }
+
+  // a. Resolve operator a partir do token da URL.
+  const { data: tokenRow, error: tokenErr } = await supabaseServer
+    .from("operator_webhook_tokens")
+    .select("operator")
+    .eq("token", operatorToken)
+    .maybeSingle();
+
+  if (tokenErr) {
+    console.error("webhook-checkout: failed to resolve operator token:", tokenErr);
+    return res.status(500).json({ success: false, error: "Erro ao resolver token do operador." });
+  }
+  if (!tokenRow) {
+    return res.status(404).json({ success: false, error: "Token de operador não encontrado." });
+  }
+  const operator = tokenRow.operator;
+
+  // b. Sempre grava o evento bruto, antes de processar nada (auditoria).
+  const { data: rawEvent, error: rawInsertErr } = await supabaseServer
+    .from("webhook_events_raw")
+    .insert([{
+      operator,
+      platform,
+      headers: req.headers,
+      body: req.body,
+    }])
+    .select("id")
+    .single();
+
+  if (rawInsertErr || !rawEvent) {
+    console.error("webhook-checkout: failed to record raw event:", rawInsertErr);
+    return res.status(500).json({ success: false, error: "Erro ao registrar evento de webhook." });
+  }
+  const rawEventId = rawEvent.id;
+
+  // c. Busca o adapter da plataforma.
+  const adapter = checkoutAdapters[platform];
+  if (!adapter) {
+    await supabaseServer
+      .from("webhook_events_raw")
+      .update({ processed: false, error: "unknown_platform" })
+      .eq("id", rawEventId);
+    return res.status(400).json({ success: false, error: "Plataforma de checkout desconhecida." });
+  }
+
+  try {
+    // Busca o secret salvo para (operator, platform).
+    const { data: secretRow, error: secretErr } = await supabaseServer
+      .from("webhook_secrets")
+      .select("secret")
+      .eq("operator", operator)
+      .eq("platform", platform)
+      .maybeSingle();
+    if (secretErr) throw secretErr;
+
+    const secret = secretRow?.secret;
+
+    // d. Verifica assinatura. Sem secret cadastrado, não há como validar -> trata como inválida.
+    const signatureValid = typeof secret === "string" && secret
+      ? adapter.verifySignature(req, secret)
+      : false;
+
+    if (!signatureValid) {
+      await supabaseServer
+        .from("webhook_events_raw")
+        .update({ signature_valid: false, processed: false, error: "invalid_signature" })
+        .eq("id", rawEventId);
+      return res.status(401).json({ success: false, error: "Assinatura inválida." });
+    }
+
+    // e. Faz o parse do payload normalizado.
+    const sale = adapter.parse(req.body);
+    if (!sale) {
+      await supabaseServer
+        .from("webhook_events_raw")
+        .update({ signature_valid: true, processed: false, error: "unparsed" })
+        .eq("id", rawEventId);
+      return res.status(200).json({ success: true, processed: false, error: "unparsed" });
+    }
+
+    // f. Resolve product_id via external_product_id (se houver) para este operador.
+    let productId: string | null = null;
+    if (sale.externalProductId) {
+      const { data: productRow, error: productErr } = await supabaseServer
+        .from("products")
+        .select("id")
+        .eq("operator", operator)
+        .eq("external_product_id", sale.externalProductId)
+        .maybeSingle();
+      if (productErr) throw productErr;
+      productId = productRow?.id ?? null;
+    }
+
+    const { data: saleRow, error: saleUpsertErr } = await supabaseServer
+      .from("sales")
+      .upsert([{
+        operator,
+        platform,
+        external_order_id: sale.externalOrderId,
+        product_id: productId,
+        external_product_id: sale.externalProductId ?? null,
+        status: sale.status,
+        gross_amount: sale.grossAmount ?? null,
+        net_amount: sale.netAmount ?? null,
+        fee_amount: sale.feeAmount ?? null,
+        currency: sale.currency ?? null,
+        buyer_email: sale.buyer.email ?? null,
+        buyer_name: sale.buyer.name ?? null,
+        buyer_phone: sale.buyer.phone ?? null,
+        utm_source: sale.utm.source ?? null,
+        utm_medium: sale.utm.medium ?? null,
+        utm_campaign: sale.utm.campaign ?? null,
+        utm_content: sale.utm.content ?? null,
+        utm_term: sale.utm.term ?? null,
+        fbclid: sale.fbclid ?? null,
+        src: sale.src ?? null,
+        occurred_at: sale.occurredAt,
+        raw_payload: req.body,
+      }], { onConflict: "operator,platform,external_order_id" })
+      .select("id")
+      .single();
+    if (saleUpsertErr) throw saleUpsertErr;
+
+    const saleId = saleRow.id;
+
+    // g. Insere sale_items vinculados à venda (substitui itens antigos em caso de reenvio).
+    if (sale.items && sale.items.length > 0) {
+      const { error: deleteItemsErr } = await supabaseServer
+        .from("sale_items")
+        .delete()
+        .eq("sale_id", saleId);
+      if (deleteItemsErr) throw deleteItemsErr;
+
+      let itemsProductIds: (string | null)[] = [];
+      for (const item of sale.items) {
+        if (item.externalProductId) {
+          const { data: itemProductRow } = await supabaseServer
+            .from("products")
+            .select("id")
+            .eq("operator", operator)
+            .eq("external_product_id", item.externalProductId)
+            .maybeSingle();
+          itemsProductIds.push(itemProductRow?.id ?? null);
+        } else {
+          itemsProductIds.push(null);
+        }
+      }
+
+      const itemRows = sale.items.map((item, idx) => ({
+        operator,
+        sale_id: saleId,
+        external_product_id: item.externalProductId ?? null,
+        product_id: itemsProductIds[idx],
+        name: item.name ?? null,
+        amount: item.amount ?? null,
+        quantity: item.quantity ?? 1,
+      }));
+
+      const { error: itemsInsertErr } = await supabaseServer.from("sale_items").insert(itemRows);
+      if (itemsInsertErr) throw itemsInsertErr;
+    }
+
+    // h. Marca o evento bruto como processado com sucesso.
+    await supabaseServer
+      .from("webhook_events_raw")
+      .update({ signature_valid: true, processed: true, error: null })
+      .eq("id", rawEventId);
+
+    return res.status(200).json({ success: true, processed: true, saleId });
+  } catch (err: any) {
+    console.error("webhook-checkout: failed to process sale:", err);
+    await supabaseServer
+      .from("webhook_events_raw")
+      .update({ processed: false, error: err.message || "processing_failed" })
+      .eq("id", rawEventId);
+    return res.status(500).json({ success: false, error: "Erro ao processar venda." });
   }
 });
 
