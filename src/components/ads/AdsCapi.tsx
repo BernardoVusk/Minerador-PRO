@@ -410,7 +410,7 @@ export function AdsCapi() {
       const res = await fetch("/api/ads/capi/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ capiConfigId: config.id })
+        body: JSON.stringify({ capiConfigId: config.id, operator })
       });
       const data = await res.json();
       if (!data.success) {

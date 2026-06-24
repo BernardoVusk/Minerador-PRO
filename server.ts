@@ -4296,9 +4296,9 @@ app.post("/api/ads/capi/config", async (req, res) => {
 // de CAPI — usado pelo botão "Enviar evento de teste" da aba "Meta CAPI" para validar que o
 // access_token e o fb_pixel_id estão corretos antes de depender disso em produção.
 app.post("/api/ads/capi/test", async (req, res) => {
-  const { capiConfigId } = req.body;
-  if (!capiConfigId) {
-    return res.status(400).json({ success: false, error: "capiConfigId é obrigatório." });
+  const { capiConfigId, operator } = req.body;
+  if (!capiConfigId || !operator) {
+    return res.status(400).json({ success: false, error: "capiConfigId e operator são obrigatórios." });
   }
 
   if (!supabaseServer) {
@@ -4310,6 +4310,7 @@ app.post("/api/ads/capi/test", async (req, res) => {
       .from("capi_configs")
       .select("*")
       .eq("id", capiConfigId)
+      .eq("operator", operator)
       .maybeSingle();
     if (findErr) throw findErr;
     if (!config) {
