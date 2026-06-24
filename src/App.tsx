@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Activity, LayoutDashboard, Cpu, BookOpen, Heart, Coffee, RefreshCcw, Database, FolderHeart, Menu, X, Radio, Bot, Zap, Users, Layers, Plug2, ShieldCheck } from "lucide-react";
+import { Activity, LayoutDashboard, Cpu, BookOpen, Heart, Coffee, RefreshCcw, Database, FolderHeart, Menu, X, Radio, Bot, Zap, Users, Layers, Plug2, ShieldCheck, Megaphone } from "lucide-react";
 import { OfferHit, Tracker } from "./types";
 import { FALLBACK_TRACKERS } from "./constants/fallbackTrackers";
 import { MiningPanel } from "./components/MiningPanel";
@@ -16,6 +16,7 @@ import { AudienceDossierPanel } from "./components/AudienceDossierPanel";
 import { FunnelBuilderPanel } from "./components/FunnelBuilderPanel";
 import { PlaybookPanel } from "./components/PlaybookPanel";
 import { IntegrationsPanel } from "./components/IntegrationsPanel";
+import { AdsModule } from "./components/ads/AdsModule";
 import { FacebookCallbackHandler } from "./components/FacebookCallbackHandler";
 import { LandingScreen } from "./components/LandingScreen";
 import { useAuth } from "./hooks/useAuth";
@@ -192,7 +193,7 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
-  const [activeTab, setActiveTab] = useState<"mining" | "vault" | "radar" | "playbooks" | "agents" | "angles" | "audience" | "funnel" | "compliance" | "help" | "integrations">("mining");
+  const [activeTab, setActiveTab] = useState<"mining" | "vault" | "radar" | "ads" | "playbooks" | "agents" | "angles" | "audience" | "funnel" | "compliance" | "help" | "integrations">("mining");
   const [apiKey, setApiKey] = useState("");
   const [days, setDays] = useState(30);
   const [isSupabaseOpen, setIsSupabaseOpen] = useState(false);
@@ -362,6 +363,19 @@ export default function App() {
             >
               <Radio className="w-4 h-4 shrink-0 text-primary animate-pulse transition-colors duration-200" />
               <span>Radar Meta Ads</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("ads")}
+              id="tab-ads"
+              className={`w-full px-4 py-3 rounded-mac-md text-xs font-sans font-semibold tracking-wide transition-all duration-200 flex items-center gap-3 cursor-pointer select-none text-left border ${
+                activeTab === "ads"
+                  ? "bg-primary/15 border-primary/25 text-white shadow-[0_0_20px_rgba(255,69,58,0.15)] font-bold"
+                  : "text-zinc-400 border-transparent hover:text-white hover:bg-white/[0.05] hover:border-white/5"
+              }`}
+            >
+              <Megaphone className="w-4 h-4 shrink-0 text-primary transition-colors duration-200" />
+              <span>Anúncios</span>
             </button>
           </div>
 
@@ -609,7 +623,8 @@ export default function App() {
                 title: "Tráfego Pago",
                 items: [
                   { id: "vault", label: "Cofre Criativos", icon: FolderHeart },
-                  { id: "radar", label: "Radar Meta Ads", icon: Radio }
+                  { id: "radar", label: "Radar Meta Ads", icon: Radio },
+                  { id: "ads", label: "Anúncios", icon: Megaphone }
                 ]
               },
               {
@@ -783,6 +798,8 @@ export default function App() {
             {activeTab === "playbooks" && <PlaybookPanel />}
 
             {activeTab === "radar" && <MetaAdsRadar />}
+
+            {activeTab === "ads" && <AdsModule />}
 
             {activeTab === "agents" && <AIAgentsPanel />}
 
