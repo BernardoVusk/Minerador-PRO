@@ -3974,6 +3974,34 @@ app.post("/api/ads/webhook-secret", async (req, res) => {
   }
 });
 
+// Tamanho de página usado por `fetchAllRows` — igual ao cap padrão do PostgREST, para que cada
+// página individual nunca seja ela mesma truncada pelo limite implícito.
+const SUPABASE_PAGE_SIZE = 1000;
+
+// Busca TODAS as linhas que casam com os filtros de uma query, paginando via `.range()` em vez
+// de confiar no limite implícito de 1000 linhas do PostgREST (que trunca silenciosamente,
+// sem erro, qualquer `select` sem `.limit()`/`.range()` explícito). Necessário para queries que
+// agregam `sales`/`ad_insights_daily` em memória sobre um operador que pode acumular mais de
+// 1000 linhas (ex: atribuição busca TODAS as vendas do operador, sem filtro de data).
+// `buildPage` recebe o range [from, to] (inclusive, índice 0-based) e devolve uma NOVA query
+// builder do Supabase com esse range aplicado — precisa ser uma fábrica (em vez de uma query já
+// montada) porque uma query builder do Supabase só pode ser `await`ada uma vez.
+async function fetchAllRows<T>(
+  buildPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>
+): Promise<T[]> {
+  const allRows: T[] = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await buildPage(offset, offset + SUPABASE_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = data || [];
+    allRows.push(...page);
+    if (page.length < SUPABASE_PAGE_SIZE) break;
+    offset += SUPABASE_PAGE_SIZE;
+  }
+  return allRows;
+}
+
 // ---------------------------------------------------------------------------
 // Atribuição (Task 18)
 //
@@ -4026,43 +4054,52 @@ app.post("/api/ads/attribution/recompute", async (req, res) => {
   }
 
   try {
-    const { data: sales, error: salesErr } = await supabaseServer
-      .from("sales")
-      .select("id, utm_campaign, utm_content, fbclid")
-      .eq("operator", operator);
-    if (salesErr) throw salesErr;
+    const sales = await fetchAllRows((from, to) =>
+      supabaseServer!
+        .from("sales")
+        .select("id, utm_campaign, utm_content, fbclid")
+        .eq("operator", operator)
+        .range(from, to)
+    );
 
-    const { data: campaignInsights, error: campaignErr } = await supabaseServer
-      .from("ad_insights_daily")
-      .select("fb_entity_id, entity_name")
-      .eq("operator", operator)
-      .eq("level", "campaign")
-      .not("entity_name", "is", null);
-    if (campaignErr) throw campaignErr;
+    // `ad_insights_daily` tem uma linha por (entidade, dia) — sem filtro de data aqui, então o
+    // total cresce com nº de campanhas/anúncios × dias de histórico e pode passar de 1000
+    // linhas com o tempo, daí a paginação igual à de `sales` acima.
+    const campaignInsights = await fetchAllRows((from, to) =>
+      supabaseServer!
+        .from("ad_insights_daily")
+        .select("fb_entity_id, entity_name")
+        .eq("operator", operator)
+        .eq("level", "campaign")
+        .not("entity_name", "is", null)
+        .range(from, to)
+    );
 
-    const { data: adInsights, error: adErr } = await supabaseServer
-      .from("ad_insights_daily")
-      .select("fb_entity_id")
-      .eq("operator", operator)
-      .eq("level", "ad");
-    if (adErr) throw adErr;
+    const adInsights = await fetchAllRows((from, to) =>
+      supabaseServer!
+        .from("ad_insights_daily")
+        .select("fb_entity_id")
+        .eq("operator", operator)
+        .eq("level", "ad")
+        .range(from, to)
+    );
 
     // Mapa normalizado (trim + lowercase) de nome de campanha -> fb_entity_id, para o
     // casamento (a). Várias linhas de insight (uma por dia) podem ter o mesmo entity_name —
     // o `Map` simplesmente fica com a última, o que não importa pois o id é o mesmo.
     const campaignByName = new Map<string, string>();
-    for (const row of campaignInsights || []) {
+    for (const row of campaignInsights) {
       if (!row.entity_name) continue;
       campaignByName.set(row.entity_name.trim().toLowerCase(), row.fb_entity_id);
     }
 
     // Set de ad ids conhecidos, para o casamento (b) — comparação exata (sem normalização),
     // já que `{{ad.id}}` grava o id numérico literal, sem variação de caixa/espaço.
-    const adIds = new Set((adInsights || []).map((row) => row.fb_entity_id));
+    const adIds = new Set(adInsights.map((row) => row.fb_entity_id));
 
     const acc: AttributionAccumulator = { updated: 0, byModel: { utm: 0, fbclid: 0, none: 0 } };
 
-    for (const sale of sales || []) {
+    for (const sale of sales) {
       let attributedCampaignId: string | null = null;
       let attributedAdId: string | null = null;
       let attributionModel: "utm" | "fbclid" | "none";
@@ -4120,18 +4157,20 @@ app.get("/api/ads/attribution/summary", async (req, res) => {
   }
 
   try {
-    const { data: sales, error: salesErr } = await supabaseServer
-      .from("sales")
-      .select(
-        "id, attributed_campaign_id, attributed_ad_id, attribution_model, gross_amount, occurred_at, platform, products(name)"
-      )
-      .eq("operator", operator);
-    if (salesErr) throw salesErr;
+    const sales = await fetchAllRows((from, to) =>
+      supabaseServer!
+        .from("sales")
+        .select(
+          "id, attributed_campaign_id, attributed_ad_id, attribution_model, gross_amount, occurred_at, platform, products(name)"
+        )
+        .eq("operator", operator)
+        .range(from, to)
+    );
 
-    const attributedSales = (sales || []).filter(
+    const attributedSales = sales.filter(
       (s) => s.attributed_campaign_id || s.attributed_ad_id
     );
-    const unattributedSales = (sales || []).filter(
+    const unattributedSales = sales.filter(
       (s) => !s.attributed_campaign_id && !s.attributed_ad_id
     );
 
@@ -4157,19 +4196,23 @@ app.get("/api/ads/attribution/summary", async (req, res) => {
     }> = [];
 
     if (entityIds.length > 0) {
-      const { data: insights, error: insightsErr } = await supabaseServer
-        .from("ad_insights_daily")
-        .select("fb_entity_id, entity_name, level, spend")
-        .eq("operator", operator)
-        .in("fb_entity_id", entityIds);
-      if (insightsErr) throw insightsErr;
+      // Sem filtro de data: soma o spend de TODO o histórico de cada entidade, então também
+      // pode passar de 1000 linhas (mesmo motivo do `ad_insights_daily` acima).
+      const insights = await fetchAllRows((from, to) =>
+        supabaseServer!
+          .from("ad_insights_daily")
+          .select("fb_entity_id, entity_name, level, spend")
+          .eq("operator", operator)
+          .in("fb_entity_id", entityIds)
+          .range(from, to)
+      );
 
       // Agrega spend (soma de todas as datas) e mantém o último entity_name/level vistos por id.
       const byEntity = new Map<
         string,
         { entity_name: string | null; level: string; spend: number }
       >();
-      for (const row of insights || []) {
+      for (const row of insights) {
         const prev = byEntity.get(row.fb_entity_id);
         byEntity.set(row.fb_entity_id, {
           entity_name: row.entity_name ?? prev?.entity_name ?? null,
@@ -4974,14 +5017,18 @@ app.get("/api/ads/dashboard", async (req, res) => {
       .lte("date", to);
     if (insightsErr) throw insightsErr;
 
-    const { data: sales, error: salesErr } = await supabaseServer
-      .from("sales")
-      .select("product_id, gross_amount, net_amount, occurred_at, products(name)")
-      .eq("operator", operator)
-      .eq("status", "approved")
-      .gte("occurred_at", `${from}T00:00:00.000Z`)
-      .lte("occurred_at", `${to}T23:59:59.999Z`);
-    if (salesErr) throw salesErr;
+    // Sem `.limit()`: dependendo do tamanho do intervalo [from, to] e do volume de vendas do
+    // operador, pode passar de 1000 linhas, daí a paginação via `fetchAllRows`.
+    const sales = await fetchAllRows((rangeFrom, rangeTo) =>
+      supabaseServer!
+        .from("sales")
+        .select("product_id, gross_amount, net_amount, occurred_at, products(name)")
+        .eq("operator", operator)
+        .eq("status", "approved")
+        .gte("occurred_at", `${from}T00:00:00.000Z`)
+        .lte("occurred_at", `${to}T23:59:59.999Z`)
+        .range(rangeFrom, rangeTo)
+    );
 
     // Soma o gasto por data (string YYYY-MM-DD, mesmo formato da coluna `date`).
     const spendByDate = new Map<string, number>();
@@ -4991,7 +5038,7 @@ app.get("/api/ads/dashboard", async (req, res) => {
 
     // Soma a receita por data, extraindo a data (UTC) de `occurred_at` (timestamptz).
     const revenueByDate = new Map<string, number>();
-    for (const sale of sales || []) {
+    for (const sale of sales) {
       const date = (sale.occurred_at as string).slice(0, 10);
       revenueByDate.set(date, (revenueByDate.get(date) || 0) + (sale.gross_amount || 0));
     }
@@ -5013,8 +5060,8 @@ app.get("/api/ads/dashboard", async (req, res) => {
 
     const totalSpend = series.reduce((sum, day) => sum + day.spend, 0);
     const totalRevenue = series.reduce((sum, day) => sum + day.revenue, 0);
-    const salesCount = (sales || []).length;
-    const totalProfit = (sales || []).reduce((sum, sale: any) => sum + (sale.net_amount || 0), 0);
+    const salesCount = sales.length;
+    const totalProfit = sales.reduce((sum, sale: any) => sum + (sale.net_amount || 0), 0);
 
     const totals = {
       revenue: totalRevenue,
@@ -5028,7 +5075,7 @@ app.get("/api/ads/dashboard", async (req, res) => {
     // Receita por produto: agrupa pelo nome resolvido via join (vendas sem `product_id` ou
     // cujo produto foi apagado caem em "Sem produto", para não perder o valor da venda).
     const revenueByProduct = new Map<string, number>();
-    for (const sale of (sales || []) as any[]) {
+    for (const sale of sales as any[]) {
       const productName = sale.products?.name || "Sem produto";
       revenueByProduct.set(productName, (revenueByProduct.get(productName) || 0) + (sale.gross_amount || 0));
     }
@@ -5063,18 +5110,21 @@ async function computeAdsPeriodTotals(
     .lte("date", to);
   if (insightsErr) throw insightsErr;
 
-  const { data: sales, error: salesErr } = await supabaseServer!
-    .from("sales")
-    .select("gross_amount")
-    .eq("operator", operator)
-    .eq("status", "approved")
-    .gte("occurred_at", `${from}T00:00:00.000Z`)
-    .lte("occurred_at", `${to}T23:59:59.999Z`);
-  if (salesErr) throw salesErr;
+  // Sem `.limit()`: períodos largos (ex: "todo o histórico") podem passar de 1000 vendas.
+  const sales = await fetchAllRows((rangeFrom, rangeTo) =>
+    supabaseServer!
+      .from("sales")
+      .select("gross_amount")
+      .eq("operator", operator)
+      .eq("status", "approved")
+      .gte("occurred_at", `${from}T00:00:00.000Z`)
+      .lte("occurred_at", `${to}T23:59:59.999Z`)
+      .range(rangeFrom, rangeTo)
+  );
 
   const totalSpend = (insights || []).reduce((sum, row) => sum + (row.spend || 0), 0);
-  const totalRevenue = (sales || []).reduce((sum, sale) => sum + (sale.gross_amount || 0), 0);
-  const salesCount = (sales || []).length;
+  const totalRevenue = sales.reduce((sum, sale) => sum + (sale.gross_amount || 0), 0);
+  const salesCount = sales.length;
 
   return {
     revenue: totalRevenue,
@@ -5119,18 +5169,20 @@ app.get("/api/ads/analytics", async (req, res) => {
 
     // Breakdown por UTM campaign e funil: calculados sobre o período B (vendas/eventos
     // "approved"/registrados dentro de periodB_from..periodB_to).
-    const { data: salesB, error: salesBErr } = await supabaseServer
-      .from("sales")
-      .select("utm_campaign, gross_amount")
-      .eq("operator", operator)
-      .eq("status", "approved")
-      .gte("occurred_at", `${periodB_from}T00:00:00.000Z`)
-      .lte("occurred_at", `${periodB_to}T23:59:59.999Z`);
-    if (salesBErr) throw salesBErr;
+    const salesB = await fetchAllRows((rangeFrom, rangeTo) =>
+      supabaseServer!
+        .from("sales")
+        .select("utm_campaign, gross_amount")
+        .eq("operator", operator)
+        .eq("status", "approved")
+        .gte("occurred_at", `${periodB_from}T00:00:00.000Z`)
+        .lte("occurred_at", `${periodB_to}T23:59:59.999Z`)
+        .range(rangeFrom, rangeTo)
+    );
 
     // Vendas sem utm_campaign caem em "Sem UTM" em vez de serem descartadas do breakdown.
     const byCampaignMap = new Map<string, { revenue: number; salesCount: number }>();
-    for (const sale of salesB || []) {
+    for (const sale of salesB) {
       const campaign = sale.utm_campaign || "Sem UTM";
       const entry = byCampaignMap.get(campaign) || { revenue: 0, salesCount: 0 };
       entry.revenue += sale.gross_amount || 0;
