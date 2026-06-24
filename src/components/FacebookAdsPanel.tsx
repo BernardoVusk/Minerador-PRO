@@ -43,6 +43,12 @@ interface AdSet {
   };
 }
 
+// No domínio da Netlify usamos as Netlify Functions; em qualquer outro (ex: Vercel),
+// as mesmas rotas estão expostas via Express em /api/facebook/*
+const isNetlifyHost = () => window.location.hostname.endsWith("netlify.app");
+const fbEndpoint = (netlifyFn: string, apiPath: string) =>
+  isNetlifyHost() ? `/.netlify/functions/${netlifyFn}` : `/api/facebook/${apiPath}`;
+
 export function FacebookAdsPanel() {
   const operator = useOperator();
   const CREDENTIALS_KEY = `vusk_fb_credentials_${operator.toLowerCase()}`;
@@ -102,7 +108,7 @@ export function FacebookAdsPanel() {
     if (authState.isConnected && authState.accessToken) {
       setIsLoadingAccounts(true);
       setError(null);
-      fetch(`/.netlify/functions/facebook-ad-accounts?accessToken=${encodeURIComponent(authState.accessToken)}`)
+      fetch(`${fbEndpoint("facebook-ad-accounts", "ad-accounts")}?accessToken=${encodeURIComponent(authState.accessToken)}`)
         .then(res => res.json())
         .then(data => {
           if (data.success) {
@@ -205,7 +211,7 @@ export function FacebookAdsPanel() {
     try {
       // 1. Fetch Account Insights
       const insightsRes = await fetch(
-        `/.netlify/functions/facebook-account-insights?accessToken=${encodeURIComponent(cleanToken)}&adAccountId=${encodeURIComponent(cleanId)}&datePreset=${datePreset}`
+        `${fbEndpoint("facebook-account-insights", "account-insights")}?accessToken=${encodeURIComponent(cleanToken)}&adAccountId=${encodeURIComponent(cleanId)}&datePreset=${datePreset}`
       );
       const insightsData = await insightsRes.json();
 
@@ -216,7 +222,7 @@ export function FacebookAdsPanel() {
 
       // 2. Fetch Campaigns
       const campaignsRes = await fetch(
-        `/.netlify/functions/facebook-campaigns?accessToken=${encodeURIComponent(cleanToken)}&adAccountId=${encodeURIComponent(cleanId)}&datePreset=${datePreset}`
+        `${fbEndpoint("facebook-campaigns", "campaigns")}?accessToken=${encodeURIComponent(cleanToken)}&adAccountId=${encodeURIComponent(cleanId)}&datePreset=${datePreset}`
       );
       const campaignsData = await campaignsRes.json();
 
@@ -258,7 +264,7 @@ export function FacebookAdsPanel() {
     try {
       const cleanToken = accessToken.trim();
       const adsetsRes = await fetch(
-        `/.netlify/functions/facebook-adsets?accessToken=${encodeURIComponent(cleanToken)}&campaignId=${campaignId}&datePreset=${datePreset}`
+        `${fbEndpoint("facebook-adsets", "adsets")}?accessToken=${encodeURIComponent(cleanToken)}&campaignId=${campaignId}&datePreset=${datePreset}`
       );
       const adsetsData = await adsetsRes.json();
 
