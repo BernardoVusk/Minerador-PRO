@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Wallet, RefreshCw, AlertCircle, Star, CheckCircle2 } from "lucide-react";
 import { useFacebookAuth } from "../../hooks/useFacebookAuth";
 import { useAdsData } from "../../hooks/useAdsData";
+import { fbEndpoint } from "../../lib/fbEndpoint";
 
 interface AdAccountRow {
   id: string;
@@ -50,7 +51,7 @@ export function AdsAccounts() {
     setError(null);
     try {
       const res = await fetch(
-        `/api/facebook/ad-accounts?accessToken=${encodeURIComponent(authState.accessToken)}`
+        `${fbEndpoint("facebook-ad-accounts", "ad-accounts")}?accessToken=${encodeURIComponent(authState.accessToken)}`
       );
       const data = await res.json();
       if (!res.ok || data.success === false) {

@@ -6,6 +6,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { useFacebookAuth } from "../hooks/useFacebookAuth";
 import { useOperator } from "../contexts/OperatorContext";
+import { fbEndpoint } from "../lib/fbEndpoint";
 
 interface AccountInsights {
   spend: string;
@@ -42,12 +43,6 @@ interface AdSet {
     }>;
   };
 }
-
-// No domínio da Netlify usamos as Netlify Functions; em qualquer outro (ex: Vercel),
-// as mesmas rotas estão expostas via Express em /api/facebook/*
-const isNetlifyHost = () => window.location.hostname.endsWith("netlify.app");
-const fbEndpoint = (netlifyFn: string, apiPath: string) =>
-  isNetlifyHost() ? `/.netlify/functions/${netlifyFn}` : `/api/facebook/${apiPath}`;
 
 export function FacebookAdsPanel() {
   const operator = useOperator();
